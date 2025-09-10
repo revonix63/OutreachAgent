@@ -1,6 +1,11 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+// server/src/index.js
+import cors from 'cors';
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || '*'   // LOCK THIS DOWN for production
+}));
 
 const app = express();
 app.use(express.json());
