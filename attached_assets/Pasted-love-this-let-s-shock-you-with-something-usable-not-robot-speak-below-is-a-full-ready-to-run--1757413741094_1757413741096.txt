@@ -1,0 +1,272 @@
+love this — let’s shock you with something usable, not robot-speak. below is a full, ready-to-run **AI Agent specification + prompts + scoring, output schema, outreach messages, and automation flow** you can paste into your AI worker (or use to train a model/agent). i organised it so the agent will *think like an obsessive human investigator* and produce high-converting, highly-personalised leads and pitch content — exactly what you described.
+
+i.  short summary of the agent’s mission
+
+* **Goal:** find LOCAL businesses (cafes/restaurants/etc.) in a given location that match strict target criteria (no website or badly outdated site, active/valuable social presence, single-owner decision maker reachable), build a demo website for each, and produce a short personalised outreach message + assets (screenshots/video) ready to send.
+* **Input from you:** location + business type (e.g. `Sedona, AZ | cafe`)
+* **Output per target:** structured lead row (CSV/JSON) + confidence score + 3 outreach messages (email, fb/ig dm, sms/whatsapp) + 1 short pitch video/screenshot link + notes (owner proof + personal hook).
+
+---
+
+# 1. Single-copy master prompt (paste into your AI agent)
+
+Use this exact block as the agent’s instruction. (It’s long because the agent must be obsessive.)
+
+> You are an investigative outreach assistant whose mission is to produce **quality, high-conversion website pitch leads** for a specified location and business type. Input: `LOCATION` and `BUSINESS_TYPE`. Follow these steps exactly and never skip verification. Return results as structured JSON.
+>
+> 1. **Search & discovery (exhaustive):** search Google Places, Google Maps listings, Bing, Yelp, TripAdvisor, Facebook Business pages, Instagram, TikTok, LinkedIn, local business directories, local news, state business registry (where available), and blog posts. If a business appears multiple places, merge into a single record.
+> 2. **Primary filter — website status:** classify the business site as: `NO_WEBSITE`, `SOCIAL_ONLY` (uses FB/IG in website field), `OUTDATED_SITE` (visual problems, non-responsive, old design/plugins, broken links), or `MODERN_SITE`. Keep only `NO_WEBSITE`, `SOCIAL_ONLY`, or `OUTDATED_SITE`.
+> 3. **Secondary filters (must pass):**
+>
+>    * **Decision-maker present:** identify an *owner*, *co-owner*, or *manager* who is clearly a decision-maker. Evidence: LinkedIn title, Instagram bio that says "owner", public interview, registration record. If not directly listed, find indirect evidence (local FB group post, menu PDF with owner name, staff bio, or matching names across platforms). Must be *recent* (within last 5 years).
+>    * **Active social footprint:** business or owner posted within the last 90 days OR has consistent customer reviews (≥ some recent reviews).
+>    * **Reputation:** average Google or Yelp rating ≥ 3.0 OR solid local engagement (pictures with customers, replies to reviews).
+>    * **Independent ownership:** NOT a corporate chain or franchise. Small family, single owner, or owner-couple is fine.
+> 4. **Gather data fields** (see output schema). For every field, store the source URL(s). When claiming "owner is X", attach at least 2 unique sources that confirm it.
+> 5. **Owner verification steps:** cross-check name across sources. If a name only appears once, search for combinations of business name + owner name, business phone + owner name, and local property/business registration. Only set `owner_verified=true` if 2+ independent sources match within last 5 years.
+> 6. **Personal hook discovery:** crawl social posts and local articles for a short, human hook (one-sentence) you can use in an outreach opener. Example hooks: "I love the hand-painted sign outside your shop" or "Your July 2024 pancake special looks like a hit." Must be truthful and cite source.
+> 7. **Create demo site (automated):** use an AI website builder API or headless browser to generate a one-page demo site tailored to the business (logo placeholder ok). Make it functional on desktop & mobile. Produce: (a) full-page screenshot (desktop), (b) mobile screenshot, (c) 20–30s screen-scroll video (MP4) showing responsiveness. Save assets and attach URLs.
+> 8. **Scoring:** compute a `lead_score` 0–100 based on weights (website problem 35, decision-maker quality 25, social activity 15, reputation 15, affordability/size match 10). Only include leads with `lead_score >= 60`. (Compute exactly and show calculation.)
+> 9. **Outreach messages:** produce three short, personalised outreach messages (email ≤120 words, fb/ig dm ≤80 words, sms/whatsapp ≤60 words). Each should: show the personal hook first, offer 1 clear benefit, include a single CTA (see template), and reference the attached demo screenshot/video link. No marketing buzz — plain, human tone.
+> 10. **Confidence & flags:** set `confidence` (0–1) and `flags` (e.g. `owner_unverified`, `multiple_owners`, `legal_restrictions`, `no_contact_email`).
+> 11. **Return format:** A JSON array of leads (max 25 per run). See the exact schema below.
+> 12. **Ethics & limits:** do not scrape private content behind login; respect robots.txt; do not expose personal data beyond publicly available business contact info. If in doubt about legality, skip the data point and flag it.
+>
+> Use aggressive but careful matching logic. Think like an FBI investigator for missing owners and a copywriter for the outreach lines.
+
+---
+
+# 2. Output schema (JSON / CSV fields)
+
+Use these fields — exact column names so you can import into spreadsheets/CRMs.
+
+* `id` (string)
+* `business_name`
+* `address`
+* `city`
+* `state`
+* `postal_code`
+* `phone_primary`
+* `website_status` (`NO_WEBSITE`/`SOCIAL_ONLY`/`OUTDATED_SITE`)
+* `website_url` (or social profile used as website)
+* `google_maps_url`
+* `yelp_url`
+* `facebook_url`
+* `instagram_url`
+* `tiktok_url`
+* `linkedin_url`
+* `email_business`
+* `owner_name`
+* `owner_verified` (true/false)
+* `owner_sources` (array of URLs)
+* `owner_contact` (direct phone/email if public)
+* `recent_posts` (date of last post)
+* `avg_rating` (number)
+* `num_reviews`
+* `independent_business` (true/false)
+* `personal_hook` (1-sentence + source URL)
+* `demo_desktop_screenshot_url`
+* `demo_mobile_screenshot_url`
+* `demo_video_url`
+* `lead_score` (0–100)
+* `score_breakdown` (object showing digit-by-digit calc)
+* `confidence` (0–1)
+* `flags` (array)
+* `outreach_email`
+* `outreach_dm`
+* `outreach_sms`
+* `timestamp` (ISO)
+
+---
+
+# 3. Scoring algorithm (weights + worked example)
+
+Weights: Website problem = 35, Decision-maker quality = 25, Social activity = 15, Reputation = 15, Size/affordability match = 10. Normalize each subscore 0–1, multiply by weight, sum to 100.
+
+**Example calculation** — do digit-by-digit per rules:
+Suppose: website\_problem = 1.0 (NO\_WEBSITE), decision\_maker\_quality = 0.8, social\_activity = 0.6, reputation = 0.7, size\_match = 0.9.
+
+Compute each weighted part:
+
+* website: 1.0 × 35 = 35.
+* decision-maker: 0.8 × 25 = 20.
+* social: 0.6 × 15 = 9.
+* reputation: 0.7 × 15 = 10.5.
+* size: 0.9 × 10 = 9.
+  Sum: 35 + 20 + 9 + 10.5 + 9 = 83.5 → `lead_score` = 83.5. (Agent should round to one decimal place.)
+
+(Agent must show this exact calculation in `score_breakdown`.)
+
+Threshold: include only if score >= 60.
+
+---
+
+# 4. Decision-maker verification heuristics (how the agent decides)
+
+1. Direct verification (best): owner listed on LinkedIn with role + business; or state business registration listing the owner in last 5 years. (score 1.0)
+2. Secondary: owner mentions same business in Instagram bio / “owner of X” post + business page lists the same name (score 0.8)
+3. Indirect: matching personal name in local news article + business phone listing (score 0.6)
+4. Weak: single mention on static page (score 0.3) — *don’t set owner\_verified true unless at least two independent sources*.
+
+Flag `owner_unverified` if only 1 source or sources older than 5 years.
+
+---
+
+# 5. Personal-hook extraction rules (what counts)
+
+* Must be factual and easily confirmable by a URL.
+* Short, 6–14 words.
+* Example categories: recent seasonal special, community event involvement, locally famous dish, owner interview quote, unique decor detail.
+* If nothing found, agent must craft a safe generic but personal line using available public data (e.g., “Your outdoor seating looks perfect for summer evenings — saw the photos on your fb page from July.”) and include the link.
+
+---
+
+# 6. Outreach templates (final versions — copy/paste ready)
+
+Use the demo screenshot/video link placeholder `{{DEMO_LINK}}` and the personal hook `{{HOOK}}`. Replace names dynamically.
+
+Email (≤120 words — subject + body):
+
+* **Subject:** Quick idea for {{business\_name}}’s website (30–60s demo)
+* **Body:**
+  Hi {{owner\_name or “there”}},
+  {{HOOK}} — love it. I made a quick 1-page website mockup for {{business\_name}} so you can see how a modern site could bring more walk-ins and reservations. Here’s a 20s demo: {{DEMO\_LINK}}. If you like what you see, I’ll set it live and keep it simple — no monthly headaches, just customers. Want me to send a version with your logo and opening hours?
+  — Alex
+
+DM for Facebook/Instagram (≤80 words):
+
+* Hey {{owner\_name}} — saw {{HOOK}}. Made a short website demo for {{business\_name}} (30s). Link: {{DEMO\_LINK}}. If you want, I can swap in your logo & menu and get it live so customers find you. Interested?
+
+SMS/WhatsApp (≤60 chars recommended in 1–2 lines; still human):
+
+* Hey {{owner\_name}}, quick site demo for {{business\_name}}: {{DEMO\_LINK}} — I can swap your menu/logo & publish it. Want that?
+
+Note: Agent should create 2 variations for each channel (friendly & slightly formal).
+
+---
+
+# 7. Automation / tech stack (recommended)
+
+* **Data sources/APIs:** Google Places API, Google Maps + Places Photos, Yelp Fusion API, Bing Web Search API, Facebook Graph API (public pages), Instagram scraping via public endpoints / or official API where available, LinkedIn scraping carefully with API or People Search, State business registries (where available).
+* **Scraping & browsers:** headless Chrome (Puppeteer / Playwright). For dynamic content (FB groups, IG posts), use headless browsing with logged-out public scraping. Respect rate limits and robots.txt.
+* **Demo site generation:** Lovable or other AI website builder with API (or use a headless-playwright script to auto-fill templates). If no builder API, use a local template generator (HTML/CSS) and replace images/menus programmatically.
+* **Media:** FFmpeg for creating 20–30s screen-scroll videos from a headless browser capture.
+* **Storage & delivery:** S3 (or similar) for screenshots/video. Provide pre-signed URLs.
+* **Orchestration:** Node.js or Python + job queue (Redis + worker pool). Each run returns max 25 leads; you can schedule daily runs.
+
+---
+
+# 8. Example of the agent’s output (placeholder lead)
+
+Below is a **safe placeholder example** — the agent should produce real URLs when running. (I’m not inventing real businesses here.)
+
+```json
+{
+  "id": "sedona-cafe-001",
+  "business_name": "Red Rock Café",
+  "address": "123 Main St",
+  "city": "Sedona",
+  "state": "AZ",
+  "postal_code": "86336",
+  "phone_primary": "(555) 123-4567",
+  "website_status": "SOCIAL_ONLY",
+  "website_url": "https://facebook.com/redrockcafe",
+  "google_maps_url": "https://maps.google/...example",
+  "yelp_url": "https://yelp.com/...example",
+  "facebook_url": "https://facebook.com/redrockcafe",
+  "instagram_url": "https://instagram.com/redrockcafe",
+  "tiktok_url": null,
+  "linkedin_url": null,
+  "email_business": "redrockcafe.contact@gmail.com",
+  "owner_name": "Maria Lopez",
+  "owner_verified": true,
+  "owner_sources": ["https://linkedin.com/in/marialopez","https://localnews.example/article"],
+  "owner_contact": "maria@example.com",
+  "recent_posts": "2025-08-12",
+  "avg_rating": 4.2,
+  "num_reviews": 128,
+  "independent_business": true,
+  "personal_hook": "Loved your red chili brunch special photo from Aug 12 — looked packed. (link: https://facebook.com/post/123)",
+  "demo_desktop_screenshot_url": "https://s3/.../sedona-cafe-001-desktop.png",
+  "demo_mobile_screenshot_url": "https://s3/.../sedona-cafe-001-mobile.png",
+  "demo_video_url": "https://s3/.../sedona-cafe-001-demo.mp4",
+  "lead_score": 83.5,
+  "score_breakdown": {
+    "website": { "value": 1.0, "weight": 35, "score": 35 },
+    "decision_maker": { "value": 0.8, "weight": 25, "score": 20 },
+    "social": { "value": 0.6, "weight": 15, "score": 9 },
+    "reputation": { "value": 0.7, "weight": 15, "score": 10.5 },
+    "size_match": { "value": 0.9, "weight": 10, "score": 9 }
+  },
+  "confidence": 0.92,
+  "flags": [],
+  "outreach_email": "Hi Maria, Loved your red chili brunch photo... [short email with demo link]",
+  "outreach_dm": "Hey Maria — saw your brunch pics... {{DEMO_LINK}}",
+  "outreach_sms": "Hi Maria, quick demo for Red Rock Café: {{DEMO_LINK}} — want it live?",
+  "timestamp": "2025-09-08T07:45:00+03:00"
+}
+```
+
+---
+
+# 9. Workflow / run steps for you (short actionable flow)
+
+1. Give agent: `Sedona, AZ | café` (or location + type).
+2. Agent runs and returns up to 25 leads JSON/CSV.
+3. Quickly scan `lead_score` and `confidence`. Pick top 5.
+4. Agent already attached demo screenshots/video and outreach messages — copy & paste the best message into email/DM and send.
+5. Log outreach in CRM; if positive reply, agent can convert the demo to a live site on approval.
+
+---
+
+# 10. Follow-up sequences & pricing suggestion (brief)
+
+* After initial message: wait 2 days → follow-up DM referencing the demo and a simple FAQ (price, turnaround).
+* Offer two pricing tiers: simple one-page (one-time \$X), plus premium (multi-page + bookings + SEO \$Y). Keep numbers local-market sensitive (agent can compute suggested prices later if you want).
+
+---
+
+# 11. Quality control & guardrails (musts)
+
+* Always attach source urls for owner claims (≥2).
+* Never include data from private accounts behind login.
+* Respect robots.txt and local scraping laws. If a platform blocks access, note it in flags.
+* If owner info is old (sold property >2 years), skip and flag.
+
+---
+
+# 12. Implementation notes you can hand to a developer
+
+* Build the agent as a pipeline of steps (discovery → verify → demo site → scoring → deliver). Make each step idempotent with caching.
+* Use a “retry” strategy for tough owner matches: (1) try LinkedIn, (2) search “{owner name} {business name}”, (3) local news, (4) property/business registry. If after these not found, set `owner_unverified`.
+* For demo site automation: create 6 templates per industry to avoid generic look. Replace hero photo with business photos from their social pages (if license allows) or use stock + caption “real photo replaced on approval”.
+
+---
+
+# 13. Example agent run configuration (recommended defaults)
+
+* Max leads per run: 25
+* Min lead\_score to return: 60
+* Owner verification required: true (must attach 2 sources)
+* Demo generation: enabled (desktop + mobile + 20–30s video)
+* Channels produced: email, FB/IG DM, SMS
+
+---
+
+# 14. Quick legal & ethical reminder
+
+* Only use publicly available contact info.
+* Don’t harvest private emails or scrape logins.
+* If state/business registry disallows scraping, use public search only.
+
+---
+
+## Final — want this packaged for you?
+
+If you like this, I can:
+
+* convert the master prompt into a single JSON you can paste into an agent trainer;
+* produce exact Playwright scripts for demo automation;
+* or produce a quick Node/Python starter repo outline (scraping + screenshot + ffmpeg pipeline).
+
+Tell me which of those you want *now* and I’ll produce it in this same message. (I won’t ask more clarifying Qs — pick from: **1) prompt JSON**, **2) Playwright demo script**, **3) starter repo outline**, **4) outreach email sequence + follow-ups**.)
